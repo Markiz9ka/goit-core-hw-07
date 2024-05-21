@@ -74,6 +74,11 @@ class Record:
         return f"Contact name: {self.name}, phones: {phones}, birthday: {birthday_str}"
 
 class AddressBook(UserDict):
+    def __str__(self):
+        if not self.data:
+            return "No contacts found."
+        return "\n".join([str(record) for record in self.data.values()])
+    
     def add_record(self, record):
         self.data[record.name.value] = record
 
@@ -90,23 +95,38 @@ class AddressBook(UserDict):
     def date_to_string(self, date):
         return date.strftime("%Y.%m.%d")
 
-    def prepare_user_list(self, user_data):
+    def prepare_user_list(self):
         prepared_list = []
-        for user in user_data:
-            prepared_list.append({"name": user["name"], "birthday": self.string_to_date(user["birthday"])})
+        for record in self.data.values():
+            if record.birthday:
+                prepared_list.append({"name": record.name.value, "birthday": self.string_to_date(record.birthday.value)})
         return prepared_list
+    
+    def find_next_weekday(self, start_date, weekday):
+        days_ahead = weekday - start_date.weekday()
+        if days_ahead <= 0:
+            days_ahead += 7
+        return start_date + timedelta(days=days_ahead)
+    
+    def adjust_for_weekend(self, birthday):
+        if birthday.weekday() >= 4:
+            return self.find_next_weekday(birthday, 0)
+        return birthday
 
     def get_upcoming_birthdays(self, days=7):
-        today = datetime.now().date()
-        upcoming_birthdays = []
-
-        for record in self.data.values():
-            birthday = record.birthday
-            if birthday:
-                birth_date = datetime.strptime(birthday.value, "%d.%m.%Y").date().replace(year=today.year)
-                if today <= birth_date <= today + timedelta(days=days):
-                    upcoming_birthdays.append({"name": record.name.value, "birthday": birth_date})
-        return upcoming_birthdays
+     today = datetime.now().date()
+     upcoming_birthdays = []
+ 
+     for record in self.data.values():
+         if record.birthday:
+             birth_date = datetime.strptime(record.birthday.value, "%d.%m.%Y").date().replace(year=today.year)
+             if birth_date < today:
+                 birth_date = birth_date.replace(year=today.year + 1)
+             adjusted_birthday = self.adjust_for_weekend(birth_date)
+             
+             if 0 <= (adjusted_birthday - today).days <= days:
+                 upcoming_birthdays.append({"name": record.name.value, "birthday": adjusted_birthday})
+     return upcoming_birthdays
 
 def input_error(func):
     def inner(*args, **kwargs):
@@ -133,10 +153,11 @@ def add_birthday(args, book: AddressBook):
 @input_error
 def show_birthday(name, book: AddressBook):
     record = book.find(name)
-    if record and record.birthday:
-        return f"Birthday for {name}: {record.birthday.value}"
-    elif record and not record.birthday:
-        return f"Birthday for {name} not added."
+    if record:
+        if record.birthday:
+            return f"Birthday for {name}: {record.birthday.value}"
+        else:
+            return f"Birthday for {name} not added."
     else:
         return f"Contact {name} not found."
 
@@ -150,18 +171,24 @@ def birthdays(book: AddressBook):
 
 @input_error
 def parse_input(user_input):
-    cmd, *args = user_input.split()
-    cmd = cmd.strip().lower()
-    return cmd, *args
+    cmd, *args = user_input.split(' ', 1)
+    if args:
+        args = args[0].split()
+    return cmd.strip().lower(), args
 
 @input_error
 def add_contact(args, book: AddressBook):
     name, phone = args
-    if len(phone) == 10:
-        book.add_record(Record(name, phone))
-        return "Contact added."
+    record = book.find(name)
+    if record:
+        record.add_phone(phone)
+        return f"Phone added."
     else:
-        raise ValueError("Invalid phone number: must be 10 digits.")
+        if len(phone) == 10:
+            book.add_record(Record(name, phone))
+            return f"Contact added."
+        else:
+            raise ValueError
 
 @input_error
 def change_contact(args, book: AddressBook):
@@ -187,7 +214,7 @@ def main():
     print("Welcome to the assistant bot!")
     while True:
         user_input = input("Enter a command: ")
-        command, *args = parse_input(user_input)
+        command, args = parse_input(user_input)
 
         if command in ["close", "exit"]:
             print("Good bye!")
